@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conectar Google · MotorDesk</title>
+</head>
+<body>
+  <p id="message">Terminando la conexión con Google…</p>
+  <script>
+    (() => {
+      'use strict';
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      const state = params.get('state');
+      const message = document.getElementById('message');
+      let parentOrigin = null;
+      try {
+        const payload = state?.split('.')[1];
+        if (payload) {
+          const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+          parentOrigin = JSON.parse(json).parent_origin;
+        }
+      } catch { /* El backend valida la firma del estado al intercambiar el código. */ }
+
+      if (!window.opener || !parentOrigin || !state) {
+        message.textContent = 'La solicitud ha caducado o no es válida. Vuelve a MotorDesk e inténtalo de nuevo.';
+        return;
+      }
+      if (code) {
+        window.opener.postMessage({ source: 'motordesk-google-bridge', event: 'FINISH', code, state }, parentOrigin);
+        message.textContent = 'Conexión completada. Puedes cerrar esta ventana.';
+        setTimeout(() => window.close(), 800);
+        return;
+      }
+      const error = params.get('error') || 'Google canceló la autorización.';
+      window.opener.postMessage({ source: 'motordesk-google-bridge', event: 'ERROR', error, state }, parentOrigin);
+      message.textContent = `No se pudo completar la conexión: ${error}`;
+    })();
+  </script>
+</body>
+</html>

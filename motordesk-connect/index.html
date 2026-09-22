@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conectar WhatsApp Business · MotorDesk</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; color: #17223a; background: #f4f7fb; }
+    main { max-width: 430px; padding: 32px; text-align: center; background: white; border-radius: 16px; box-shadow: 0 12px 36px #1021451a; }
+    h1 { font-size: 1.35rem; margin: 0 0 12px; } p { line-height: 1.5; color: #536078; }
+    .error { color: #b42318; } .spinner { width: 32px; height: 32px; margin: 20px auto; border: 4px solid #dce6f7; border-top-color: #1565c0; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Conectando WhatsApp Business</h1>
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="message">Esperando a Meta…</p>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+      const params = new URLSearchParams(window.location.search);
+      const appId = params.get('app_id');
+      const configId = params.get('config_id');
+      const parentOrigin = params.get('parent_origin');
+      const state = params.get('state');
+      const message = document.getElementById('message');
+      let code = null;
+      let wabaId = null;
+      let phoneNumberId = null;
+
+      function parentOriginIsLocal(origin) {
+        try {
+          const url = new URL(origin);
+          if (url.protocol !== 'https:' || url.port !== '8443') return false;
+          const host = url.hostname;
+          return host === 'localhost'
+            || /^192\.168\./.test(host)
+            || /^10\./.test(host)
+            || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+        } catch { return false; }
+      }
+
+      function returnToMotorDesk(event, extra) {
+        if (!window.opener || !parentOrigin || !state) return;
+        window.opener.postMessage({
+          source: 'motordesk-whatsapp-bridge', state, event, ...extra,
+        }, parentOrigin);
+      }
+
+      function fail(text) {
+        message.textContent = text;
+        message.className = 'error';
+        returnToMotorDesk('ERROR', { error: text });
+      }
+
+      function finishIfReady() {
+        if (!code || !wabaId || !phoneNumberId) return;
+        message.textContent = 'Conexión completada. Puedes cerrar esta ventana.';
+        returnToMotorDesk('FINISH', {
+          code, waba_id: wabaId, phone_number_id: phoneNumberId,
+        });
+        window.setTimeout(() => window.close(), 800);
+      }
+
+      if (!appId || !configId || !state || !parentOriginIsLocal(parentOrigin)) {
+        fail('Solicitud de conexión no válida. Vuelve a MotorDesk e inténtalo de nuevo.');
+        return;
+      }
+
+      window.addEventListener('message', (event) => {
+        if (!['https://www.facebook.com', 'https://web.facebook.com', 'https://business.facebook.com'].includes(event.origin)) return;
+        let data = event.data;
+        try { if (typeof data === 'string') data = JSON.parse(data); } catch { return; }
+        if (data?.type !== 'WA_EMBEDDED_SIGNUP') return;
+        if (data.event === 'FINISH') {
+          wabaId = data?.data?.waba_id || null;
+          phoneNumberId = data?.data?.phone_number_id || null;
+          finishIfReady();
+        } else if (data.event === 'ERROR' || data.event === 'CANCEL') {
+          fail(data?.data?.error_message || data?.data?.error || 'La conexión fue cancelada.');
+        }
+      });
+
+      window.fbAsyncInit = () => {
+        window.FB.init({ appId, cookie: true, xfbml: false, version: 'v23.0' });
+        window.FB.login((response) => {
+          code = response?.authResponse?.code || null;
+          if (!code) {
+            fail('Meta no completó la autorización. Comprueba que tu cuenta tiene acceso a la aplicación.');
+            return;
+          }
+          finishIfReady();
+        }, {
+          config_id: configId,
+          auth_type: 'rerequest',
+          response_type: 'code',
+          override_default_response_type: true,
+          extras: { setup: {}, sessionInfoVersion: '3' },
+        });
+      };
+
+      const sdk = document.createElement('script');
+      sdk.async = true;
+      sdk.defer = true;
+      sdk.crossOrigin = 'anonymous';
+      sdk.src = 'https://connect.facebook.net/en_US/sdk.js';
+      sdk.onerror = () => fail('No se ha podido cargar el servicio de Meta. Comprueba la conexión a Internet.');
+      document.head.appendChild(sdk);
+    })();
+  </script>
+</body>
+</html>
